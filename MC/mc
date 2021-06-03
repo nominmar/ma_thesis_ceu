@@ -1,0 +1,56 @@
+import pandas as pd
+import numpy as np
+from random import random
+
+from CTL2.causal_tree_learn import CausalTree
+from DGP.DGP import dgp2
+from DGP.DGP import dgp4
+from DGP.DGP import dgp8
+
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error as mse
+
+
+def mc_ate2(n, tsize, var_e, reps, est_size):
+    ATE1 = np.ones(reps)*1.5
+    ATE2 = np.ones(reps)*-1.5
+    #predicted ATE
+    ate1 = []
+    ate2 = []
+    tauhat = np.zeros((tsize, 1))
+    #test sample
+    x_test, y_test, treat_test = dgp2(tsize,var_e)
+    #MC iterations
+    for i in range(reps):
+        #train + est sample
+        x_train, y_train, treat_train = dgp2(n, var_e)
+        #true CATE
+        tau = np.where((x_test[:,0] >= 0),1.5, -1.5)
+        #fit the tree
+        ctl = CausalTree(honest=True, weight=0.0, split_size=0.0, max_depth = 3) #which type of tree to call
+        ctl.fit(x_train, y_train, treat_train, est_size = est_size) #select est size when fitting
+        ctl.prune()
+        ctl_predict = ctl.predict(x_test)
+        #predicted ATE
+        ate1 = np.append(ate1, np.mean(ctl_predict[np.where(x_test[:,0] >= 0)]))
+        ate2 = np.append(ate2, np.mean(ctl_predict[np.where(x_test[:,0] < 0)]))
+        #predicted ITE
+        tauhat = np.append(tauhat, ctl_predict.reshape(-1,1), axis = 1)
+    #CATE MSE's
+    mean_ate = np.array([np.mean(ate1), np.mean(ate2)])    
+    mse_ate = np.array([mse(ATE1, ate1), mse(ATE2, ate2)])
+    bias_ate = np.array([np.sum(np.subtract(ATE1,ate1))/reps, np.sum(np.subtract(ATE2,ate2))/reps])
+    var_ate = np.array([np.var(ate1), np.var(ate2)])
+
+    #TOTAL MSE's
+    ind_var = np.var(tauhat[:, 1:], axis = 1)
+    ind_mean = np.mean(tauhat, axis = 1)
+
+    total_var = np.sum(ind_var)/tsize
+    total_bias = np.sum(np.square(np.subtract(ind_mean, tau)))/tsize
+    total_mse = total_var + total_bias
+
+    results = np.concatenate([np.array([est_size]), mean_ate, bias_ate, var_ate, mse_ate, np.array([total_bias]), np.array([total_var]), np.array([total_mse])])
+    return results
+
+    
